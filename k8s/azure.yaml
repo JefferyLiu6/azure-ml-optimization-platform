@@ -1,0 +1,404 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mfbo
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mfbo-workload
+  namespace: mfbo
+  annotations:
+    azure.workload.identity/client-id: "__AZURE_CLIENT_ID__"
+---
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: mfbo-key-vault
+  namespace: mfbo
+spec:
+  provider: azure
+  secretObjects:
+    - secretName: mfbo-runtime-secrets
+      type: Opaque
+      data:
+        - objectName: api-key
+          key: api-key
+        - objectName: application-insights-connection-string
+          key: application-insights-connection-string
+  parameters:
+    usePodIdentity: "false"
+    clientID: "__AZURE_CLIENT_ID__"
+    keyvaultName: "__KEY_VAULT_NAME__"
+    tenantId: "__AZURE_TENANT_ID__"
+    objects: |
+      array:
+        - |
+          objectName: api-key
+          objectType: secret
+        - |
+          objectName: application-insights-connection-string
+          objectType: secret
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mfbo-config
+  namespace: mfbo
+data:
+  MFBO_ENVIRONMENT: production
+  MLFLOW_DISABLE_TELEMETRY: "true"
+  MFBO_LOG_LEVEL: INFO
+  MFBO_REPOSITORY_BACKEND: azure_blob
+  MFBO_ARTIFACT_BACKEND: azure_blob
+  MFBO_QUEUE_BACKEND: azure_queue
+  MFBO_AZURE_STORAGE_ACCOUNT_URL: "__AZURE_STORAGE_ACCOUNT_URL__"
+  MFBO_AZURE_STATE_CONTAINER: experiment-state
+  MFBO_AZURE_ARTIFACT_CONTAINER: experiment-artifacts
+  MFBO_AZURE_QUEUE_NAME: mfbo-jobs
+  MFBO_MLFLOW_TRACKING_URI: http://mfbo-mlflow:5000
+  MFBO_MLFLOW_EXPERIMENT_NAME: mfbo-platform
+  MFBO_REQUIRE_API_KEY: "true"
+  MFBO_ALLOW_DEMO_ENGINE: "true"
+  MFBO_ENGINE_BACKEND: demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mfbo-api
+  namespace: mfbo
+  labels:
+    app.kubernetes.io/name: mfbo-api
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mfbo-api
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+      labels:
+        app.kubernetes.io/name: mfbo-api
+        azure.workload.identity/use: "true"
+    spec:
+      enableServiceLinks: false
+      serviceAccountName: mfbo-workload
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: __API_IMAGE__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: mfbo-config
+          env:
+            - name: MFBO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: mfbo-runtime-secrets
+                  key: api-key
+            - name: MFBO_APPLICATIONINSIGHTS_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: mfbo-runtime-secrets
+                  key: application-insights-connection-string
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: mfbo-key-vault
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mfbo-api
+  namespace: mfbo
+spec:
+  selector:
+    app.kubernetes.io/name: mfbo-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+  type: ClusterIP
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: mfbo-api
+  namespace: mfbo
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: mfbo-api
+  minReplicas: 2
+  maxReplicas: 6
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: mfbo-api
+  namespace: mfbo
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mfbo-api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mfbo-worker
+  namespace: mfbo
+  labels:
+    app.kubernetes.io/name: mfbo-worker
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mfbo-worker
+  template:
+    metadata:
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9000"
+        prometheus.io/path: /metrics
+      labels:
+        app.kubernetes.io/name: mfbo-worker
+        azure.workload.identity/use: "true"
+    spec:
+      enableServiceLinks: false
+      serviceAccountName: mfbo-workload
+      terminationGracePeriodSeconds: 45
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: worker
+          image: __WORKER_IMAGE__
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: metrics
+              containerPort: 9000
+          envFrom:
+            - configMapRef:
+                name: mfbo-config
+          env:
+            - name: MFBO_ENGINE_BACKEND
+              value: demo
+            - name: MFBO_WORKER_ID
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MFBO_APPLICATIONINSIGHTS_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: mfbo-runtime-secrets
+                  key: application-insights-connection-string
+          readinessProbe:
+            exec:
+              command: ["python", "-m", "mfbo_platform.healthcheck"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["python", "-m", "mfbo_platform.healthcheck"]
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: secrets-store
+              mountPath: /mnt/secrets-store
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: secrets-store
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: mfbo-key-vault
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mfbo-mlflow
+  namespace: mfbo
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mfbo-mlflow
+  namespace: mfbo
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mfbo-mlflow
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mfbo-mlflow
+    spec:
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: mlflow
+          image: __TRACKING_IMAGE__
+          command: ["mlflow", "server"]
+          env:
+            - name: MLFLOW_DISABLE_TELEMETRY
+              value: "true"
+          args:
+            - --host=0.0.0.0
+            - --port=5000
+            - --backend-store-uri=sqlite:////mlflow/mlflow.db
+            - --artifacts-destination=/mlflow/artifacts
+            - --serve-artifacts
+            - --allowed-hosts=localhost:*,127.0.0.1:*,mfbo-mlflow:5000
+          ports:
+            - name: http
+              containerPort: 5000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost:5000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+              httpHeaders:
+                - name: Host
+                  value: localhost:5000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /mlflow
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: mfbo-mlflow
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mfbo-mlflow
+  namespace: mfbo
+spec:
+  selector:
+    app.kubernetes.io/name: mfbo-mlflow
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http
+  type: ClusterIP

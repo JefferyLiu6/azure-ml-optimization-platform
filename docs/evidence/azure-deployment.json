@@ -1,0 +1,13 @@
+{
+  "kubernetesVersion": "1.35",
+  "nodePools": [
+    {
+      "count": 1,
+      "vmSize": "Standard_D4ps_v5"
+    }
+  ],
+  "power": "Stopped",
+  "provisioning": "Succeeded",
+  "region": "canadacentral",
+  "service": "Microsoft.ContainerService/ManagedClusters"
+}

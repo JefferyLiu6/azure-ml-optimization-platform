@@ -1,0 +1,28 @@
+{
+  "scope": "Archived predecessor deployment; not the public demo",
+  "nodes": [
+    {
+      "version": "v1.35.7",
+      "architecture": "arm64",
+      "provider": "azure"
+    }
+  ],
+  "deployments": [
+    {
+      "name": "mfbo-api",
+      "desired": 2,
+      "available": 2
+    },
+    {
+      "name": "mfbo-mlflow",
+      "desired": 1,
+      "available": 1
+    },
+    {
+      "name": "mfbo-worker",
+      "desired": 1,
+      "available": 1
+    }
+  ],
+  "end_to_end_smoke_passed": true
+}

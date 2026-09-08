@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1.7
+FROM python:3.12.11-slim-bookworm AS builder
+WORKDIR /app
+RUN pip install --no-cache-dir uv==0.7.5
+COPY pyproject.toml uv.lock README.md ./
+COPY src ./src
+RUN uv sync --frozen --no-dev --extra cloud --extra observability --no-editable
+
+FROM python:3.12.11-slim-bookworm AS public-worker
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+WORKDIR /app
+RUN groupadd --system --gid 10001 mfbo && useradd --system --uid 10001 --gid mfbo mfbo
+COPY --from=builder --chown=mfbo:mfbo /app/.venv /app/.venv
+RUN mkdir -p /shared /app/data /app/artifacts && chown -R mfbo:mfbo /shared /app
+USER 10001:10001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["python", "-m", "mfbo_platform.healthcheck"]
+CMD ["mfbo-worker"]

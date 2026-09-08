@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mfbo-platform"
+version = "0.1.0"
+description = "Azure ML optimization platform with durable jobs and a random-search demo"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = {text = "Proprietary"}
+dependencies = [
+  "fastapi==0.141.1",
+  "pydantic==2.11.7",
+  "pydantic-settings==2.10.1",
+  "uvicorn[standard]==0.34.3",
+]
+
+[project.optional-dependencies]
+azure = [
+  "azure-identity==1.23.0",
+  "azure-storage-blob==12.25.1",
+  "azure-storage-queue==12.12.0",
+]
+tracking = ["mlflow==3.16.0"]
+cloud = [
+  "azure-identity==1.23.0",
+  "azure-storage-blob==12.25.1",
+  "azure-storage-queue==12.12.0",
+  "mlflow==3.16.0",
+]
+observability = [
+  "azure-monitor-opentelemetry==1.6.10",
+  "prometheus-client==0.22.1",
+]
+dev = [
+  "httpx==0.28.1",
+  "mypy==1.16.1",
+  "pytest==9.1.1",
+  "pytest-cov==6.2.1",
+  "ruff==0.12.2",
+]
+
+[project.scripts]
+mfbo-api = "mfbo_platform.cli:api"
+mfbo-worker = "mfbo_platform.cli:worker"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mfbo_platform"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["mfbo_platform"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+markers = ["integration: end-to-end tests that use only local resources"]
+
+[tool.coverage.run]
+source = ["mfbo_platform"]

@@ -1,0 +1,22 @@
+[
+  {
+    "service": "api",
+    "state": "running",
+    "health": "healthy"
+  },
+  {
+    "service": "azurite",
+    "state": "running",
+    "health": "healthy"
+  },
+  {
+    "service": "mlflow",
+    "state": "running",
+    "health": "healthy"
+  },
+  {
+    "service": "worker",
+    "state": "running",
+    "health": "healthy"
+  }
+]

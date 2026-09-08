@@ -1,11 +1,51 @@
 # Azure ML Optimization Platform
 
-A cloud-native platform for asynchronous optimization jobs: **FastAPI, durable workers,
-Azure Blob/Queue Storage, MLflow, Docker, Kubernetes, and GitHub Actions**.
+Finding a good solution often means trying many possibilities. This project helps manage
+those experiments: submit a job, let it run in the background, and come back to saved results.
 
-This public edition runs a seeded random-search demo on the standard Hartmann6 function.
-It demonstrates ML engineering, not a Bayesian optimization algorithm or research-quality
-improvements. The original research system is maintained separately and is not distributed.
+## What problem are we solving?
+
+Imagine a team trying to improve an AI model. They may need to test different settings
+before finding one that works well. Each test can take time and computing resources.
+This search for better settings is called **optimization**.
+
+Running the tests is only part of the problem. Someone also needs to keep track of what
+was tried, save the results, handle interrupted jobs, and make the experiments repeatable.
+A script that works on one laptop does not automatically provide all of that.
+
+## Why does it matter?
+
+Without a reliable system around the experiments, teams can lose track of results,
+repeat work unnecessarily, or spend time checking whether a job is still running.
+
+The goal here is to make experiments easier to run and manage—not just to build an
+algorithm that works once.
+
+## How does this platform help?
+
+1. **Submit an experiment.** Choose the supported task and how much work it should attempt.
+2. **Let it run in the background.** The system queues the job and assigns it to a worker,
+   so you do not have to keep a request open while it finishes.
+3. **Check progress or cancel.** Use the job ID to see its status and recorded results.
+4. **Keep the results.** Settings, measurements, and the best candidate found are saved
+   for review. Retry handling helps recover from certain interruptions.
+
+Think of it as a job-management system for optimization experiments. The engineering
+layer handles execution, storage, tracking, and deployment around the experiment itself.
+
+## What can you try in this public version?
+
+The included demo tries randomly chosen settings on a standard mathematical test problem.
+It lets you see the complete workflow without training an AI model or needing private
+research code. Reusing the same seed repeats the demo's sequence of choices.
+
+**The demo shows how the platform operates; it is not an advanced optimization algorithm
+and does not demonstrate research-performance improvements.** Its work budget uses demo
+units, not dollars, and is not an Azure spending cap.
+
+Under the hood, the platform uses **FastAPI, Azure Blob/Queue Storage, MLflow, Docker,
+Kubernetes, and GitHub Actions**. You can run it locally; Azure deployment instructions
+are included. Verification limits are documented below.
 
 ## Quick start
 
